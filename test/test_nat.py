@@ -7,7 +7,6 @@ import StringIO
 import random
 
 from framework import VppTestCase, VppTestRunner, running_extended_tests
-from vpp_ip_route import VppIpRoute, VppRoutePath, DpoProto
 from scapy.layers.inet import IP, TCP, UDP, ICMP
 from scapy.layers.inet import IPerror, TCPerror, UDPerror, ICMPerror
 from scapy.layers.inet6 import IPv6, ICMPv6EchoRequest, ICMPv6EchoReply
@@ -25,114 +24,6 @@ from util import mactobinary
 
 class MethodHolder(VppTestCase):
     """ NAT create capture and verify method holder """
-
-    @classmethod
-    def setUpClass(cls):
-        super(MethodHolder, cls).setUpClass()
-
-    def tearDown(self):
-        super(MethodHolder, self).tearDown()
-
-    def check_ip_checksum(self, pkt):
-        """
-        Check IP checksum of the packet
-
-        :param pkt: Packet to check IP checksum
-        """
-        new = pkt.__class__(str(pkt))
-        del new['IP'].chksum
-        new = new.__class__(str(new))
-        self.assertEqual(new['IP'].chksum, pkt['IP'].chksum)
-
-    def check_tcp_checksum(self, pkt):
-        """
-        Check TCP checksum in IP packet
-
-        :param pkt: Packet to check TCP checksum
-        """
-        new = pkt.__class__(str(pkt))
-        del new['TCP'].chksum
-        new = new.__class__(str(new))
-        self.assertEqual(new['TCP'].chksum, pkt['TCP'].chksum)
-
-    def check_udp_checksum(self, pkt):
-        """
-        Check UDP checksum in IP packet
-
-        :param pkt: Packet to check UDP checksum
-        """
-        new = pkt.__class__(str(pkt))
-        del new['UDP'].chksum
-        new = new.__class__(str(new))
-        self.assertEqual(new['UDP'].chksum, pkt['UDP'].chksum)
-
-    def check_icmp_errror_embedded(self, pkt):
-        """
-        Check ICMP error embeded packet checksum
-
-        :param pkt: Packet to check ICMP error embeded packet checksum
-        """
-        if pkt.haslayer(IPerror):
-            new = pkt.__class__(str(pkt))
-            del new['IPerror'].chksum
-            new = new.__class__(str(new))
-            self.assertEqual(new['IPerror'].chksum, pkt['IPerror'].chksum)
-
-        if pkt.haslayer(TCPerror):
-            new = pkt.__class__(str(pkt))
-            del new['TCPerror'].chksum
-            new = new.__class__(str(new))
-            self.assertEqual(new['TCPerror'].chksum, pkt['TCPerror'].chksum)
-
-        if pkt.haslayer(UDPerror):
-            if pkt['UDPerror'].chksum != 0:
-                new = pkt.__class__(str(pkt))
-                del new['UDPerror'].chksum
-                new = new.__class__(str(new))
-                self.assertEqual(new['UDPerror'].chksum,
-                                 pkt['UDPerror'].chksum)
-
-        if pkt.haslayer(ICMPerror):
-            del new['ICMPerror'].chksum
-            new = new.__class__(str(new))
-            self.assertEqual(new['ICMPerror'].chksum, pkt['ICMPerror'].chksum)
-
-    def check_icmp_checksum(self, pkt):
-        """
-        Check ICMP checksum in IPv4 packet
-
-        :param pkt: Packet to check ICMP checksum
-        """
-        new = pkt.__class__(str(pkt))
-        del new['ICMP'].chksum
-        new = new.__class__(str(new))
-        self.assertEqual(new['ICMP'].chksum, pkt['ICMP'].chksum)
-        if pkt.haslayer(IPerror):
-            self.check_icmp_errror_embedded(pkt)
-
-    def check_icmpv6_checksum(self, pkt):
-        """
-        Check ICMPv6 checksum in IPv4 packet
-
-        :param pkt: Packet to check ICMPv6 checksum
-        """
-        new = pkt.__class__(str(pkt))
-        if pkt.haslayer(ICMPv6DestUnreach):
-            del new['ICMPv6DestUnreach'].cksum
-            new = new.__class__(str(new))
-            self.assertEqual(new['ICMPv6DestUnreach'].cksum,
-                             pkt['ICMPv6DestUnreach'].cksum)
-            self.check_icmp_errror_embedded(pkt)
-        if pkt.haslayer(ICMPv6EchoRequest):
-            del new['ICMPv6EchoRequest'].cksum
-            new = new.__class__(str(new))
-            self.assertEqual(new['ICMPv6EchoRequest'].cksum,
-                             pkt['ICMPv6EchoRequest'].cksum)
-        if pkt.haslayer(ICMPv6EchoReply):
-            del new['ICMPv6EchoReply'].cksum
-            new = new.__class__(str(new))
-            self.assertEqual(new['ICMPv6EchoReply'].cksum,
-                             pkt['ICMPv6EchoReply'].cksum)
 
     def create_stream_in(self, in_if, out_if, dst_ip=None, ttl=64):
         """
@@ -383,7 +274,7 @@ class MethodHolder(VppTestCase):
         for packet in capture:
             try:
                 if not is_ip6:
-                    self.check_ip_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
                 self.assertEqual(packet[IP46].src, nat_ip)
                 if dst_ip is not None:
                     self.assertEqual(packet[IP46].dst, dst_ip)
@@ -394,7 +285,7 @@ class MethodHolder(VppTestCase):
                         self.assertNotEqual(
                             packet[TCP].sport, self.tcp_port_in)
                     self.tcp_port_out = packet[TCP].sport
-                    self.check_tcp_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
                 elif packet.haslayer(UDP):
                     if same_port:
                         self.assertEqual(packet[UDP].sport, self.udp_port_in)
@@ -408,10 +299,7 @@ class MethodHolder(VppTestCase):
                     else:
                         self.assertNotEqual(packet[ICMP46].id, self.icmp_id_in)
                     self.icmp_id_out = packet[ICMP46].id
-                    if is_ip6:
-                        self.check_icmpv6_checksum(packet)
-                    else:
-                        self.check_icmp_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
             except:
                 self.logger.error(ppp("Unexpected or invalid packet "
                                       "(outside network):", packet))
@@ -442,16 +330,14 @@ class MethodHolder(VppTestCase):
         self.assertEqual(packet_num, len(capture))
         for packet in capture:
             try:
-                self.check_ip_checksum(packet)
+                self.assert_packet_checksums_valid(packet)
                 self.assertEqual(packet[IP].dst, in_if.remote_ip4)
                 if packet.haslayer(TCP):
                     self.assertEqual(packet[TCP].dport, self.tcp_port_in)
-                    self.check_tcp_checksum(packet)
                 elif packet.haslayer(UDP):
                     self.assertEqual(packet[UDP].dport, self.udp_port_in)
                 else:
                     self.assertEqual(packet[ICMP].id, self.icmp_id_in)
-                    self.check_icmp_checksum(packet)
             except:
                 self.logger.error(ppp("Unexpected or invalid packet "
                                       "(inside network):", packet))
@@ -471,16 +357,14 @@ class MethodHolder(VppTestCase):
             try:
                 self.assertEqual(packet[IPv6].src, src_ip)
                 self.assertEqual(packet[IPv6].dst, dst_ip)
+                self.assert_packet_checksums_valid(packet)
                 if packet.haslayer(TCP):
                     self.assertEqual(packet[TCP].dport, self.tcp_port_in)
-                    self.check_tcp_checksum(packet)
                 elif packet.haslayer(UDP):
                     self.assertEqual(packet[UDP].dport, self.udp_port_in)
-                    self.check_udp_checksum(packet)
                 else:
                     self.assertEqual(packet[ICMPv6EchoReply].id,
                                      self.icmp_id_in)
-                    self.check_icmpv6_checksum(packet)
             except:
                 self.logger.error(ppp("Unexpected or invalid packet "
                                       "(inside network):", packet))
@@ -655,7 +539,7 @@ class MethodHolder(VppTestCase):
         for p in frags:
             self.assertEqual(p[IP].src, src)
             self.assertEqual(p[IP].dst, dst)
-            self.check_ip_checksum(p)
+            self.assert_ip_checksum_valid(p)
             buffer.seek(p[IP].frag * 8)
             buffer.write(p[IP].payload)
         ip = frags[0].getlayer(IP)
@@ -663,7 +547,7 @@ class MethodHolder(VppTestCase):
                 proto=frags[0][IP].proto)
         if ip.proto == IP_PROTOS.tcp:
             p = (ip / TCP(buffer.getvalue()))
-            self.check_tcp_checksum(p)
+            self.assert_tcp_checksum_valid(p)
         elif ip.proto == IP_PROTOS.udp:
             p = (ip / UDP(buffer.getvalue()))
         return p
@@ -688,9 +572,9 @@ class MethodHolder(VppTestCase):
                   nh=frags[0][IPv6ExtHdrFragment].nh)
         if ip.nh == IP_PROTOS.tcp:
             p = (ip / TCP(buffer.getvalue()))
-            self.check_tcp_checksum(p)
         elif ip.nh == IP_PROTOS.udp:
             p = (ip / UDP(buffer.getvalue()))
+        self.assert_packet_checksums_valid(p)
         return p
 
     def initiate_tcp_session(self, in_if, out_if):
@@ -1418,6 +1302,19 @@ class TestNAT44(MethodHolder):
             finally:
                 self.pg0.remote_hosts[0] = host0
 
+            user = self.pg0.remote_hosts[1]
+            sessions = self.vapi.nat44_user_session_dump(user.ip4n, 0)
+            self.assertEqual(len(sessions), 3)
+            self.assertTrue(sessions[0].ext_host_valid)
+            self.vapi.nat44_del_session(
+                sessions[0].inside_ip_address,
+                sessions[0].inside_port,
+                sessions[0].protocol,
+                ext_host_address=sessions[0].ext_host_address,
+                ext_host_port=sessions[0].ext_host_port)
+            sessions = self.vapi.nat44_user_session_dump(user.ip4n, 0)
+            self.assertEqual(len(sessions), 2)
+
         finally:
             self.vapi.nat44_forwarding_enable_disable(0)
             self.vapi.nat44_add_del_static_mapping(local_ip=real_ip,
@@ -1589,14 +1486,12 @@ class TestNAT44(MethodHolder):
         self.pg_start()
         capture = self.pg0.get_capture(1)
         p = capture[0]
-        server = None
         try:
             ip = p[IP]
             tcp = p[TCP]
             self.assertEqual(ip.dst, self.pg0.remote_ip4)
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1633,8 +1528,7 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.src, self.nat_addr)
             self.assertEqual(tcp.sport, external_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1666,14 +1560,12 @@ class TestNAT44(MethodHolder):
         self.pg_start()
         capture = self.pg0.get_capture(1)
         p = capture[0]
-        server = None
         try:
             ip = p[IP]
             tcp = p[TCP]
             self.assertEqual(ip.dst, self.pg0.remote_ip4)
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1692,8 +1584,7 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.src, self.pg0.remote_ip4)
             self.assertEqual(tcp.sport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1786,8 +1677,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.src, self.pg1.remote_ip4)
             self.assertEqual(tcp.dport, 56789)
             self.assertEqual(tcp.sport, 12345)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1836,8 +1726,7 @@ class TestNAT44(MethodHolder):
             else:
                 server = server2
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1856,11 +1745,22 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.src, self.nat_addr)
             self.assertEqual(tcp.sport, external_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
+
+        sessions = self.vapi.nat44_user_session_dump(server.ip4n, 0)
+        self.assertEqual(len(sessions), 1)
+        self.assertTrue(sessions[0].ext_host_valid)
+        self.vapi.nat44_del_session(
+            sessions[0].inside_ip_address,
+            sessions[0].inside_port,
+            sessions[0].protocol,
+            ext_host_address=sessions[0].ext_host_address,
+            ext_host_port=sessions[0].ext_host_port)
+        sessions = self.vapi.nat44_user_session_dump(server.ip4n, 0)
+        self.assertEqual(len(sessions), 0)
 
     @unittest.skipUnless(running_extended_tests(), "part of extended tests")
     def test_static_lb_multi_clients(self):
@@ -1954,8 +1854,7 @@ class TestNAT44(MethodHolder):
             else:
                 server = server2
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1974,8 +1873,7 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.src, self.nat_addr)
             self.assertEqual(tcp.sport, external_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -1995,8 +1893,7 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.dst, server1.ip4)
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -2015,8 +1912,7 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.src, server1.ip4)
             self.assertEqual(tcp.sport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -2202,6 +2098,7 @@ class TestNAT44(MethodHolder):
                 self.assertTrue(session.protocol in
                                 [IP_PROTOS.tcp, IP_PROTOS.udp,
                                  IP_PROTOS.icmp])
+                self.assertFalse(session.ext_host_valid)
 
         # pg4 session dump
         sessions = self.vapi.nat44_user_session_dump(self.pg4.remote_ip4n, 10)
@@ -2261,7 +2158,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.dst, server.ip4)
             self.assertNotEqual(tcp.sport, host_in_port)
             self.assertEqual(tcp.dport, server_in_port)
-            self.check_tcp_checksum(p)
+            self.assert_packet_checksums_valid(p)
             host_out_port = tcp.sport
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
@@ -2283,7 +2180,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.dst, host.ip4)
             self.assertEqual(tcp.sport, server_out_port)
             self.assertEqual(tcp.dport, host_in_port)
-            self.check_tcp_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -2334,7 +2231,7 @@ class TestNAT44(MethodHolder):
                     self.assertNotEqual(packet[TCP].sport, self.tcp_port_in)
                     self.assertEqual(packet[TCP].dport, server_tcp_port)
                     self.tcp_port_out = packet[TCP].sport
-                    self.check_tcp_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
                 elif packet.haslayer(UDP):
                     self.assertNotEqual(packet[UDP].sport, self.udp_port_in)
                     self.assertEqual(packet[UDP].dport, server_udp_port)
@@ -2371,7 +2268,7 @@ class TestNAT44(MethodHolder):
                 if packet.haslayer(TCP):
                     self.assertEqual(packet[TCP].dport, self.tcp_port_in)
                     self.assertEqual(packet[TCP].sport, server_tcp_port)
-                    self.check_tcp_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
                 elif packet.haslayer(UDP):
                     self.assertEqual(packet[UDP].dport, self.udp_port_in)
                     self.assertEqual(packet[UDP].sport, server_udp_port)
@@ -2407,7 +2304,7 @@ class TestNAT44(MethodHolder):
                     self.assertEqual(packet[TCP].sport, self.tcp_port_in)
                     self.assertEqual(packet[TCP].dport, server_tcp_port)
                     self.tcp_port_out = packet[TCP].sport
-                    self.check_tcp_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
                 elif packet.haslayer(UDP):
                     self.assertEqual(packet[UDP].sport, self.udp_port_in)
                     self.assertEqual(packet[UDP].dport, server_udp_port)
@@ -2444,7 +2341,7 @@ class TestNAT44(MethodHolder):
                 if packet.haslayer(TCP):
                     self.assertEqual(packet[TCP].dport, self.tcp_port_in)
                     self.assertEqual(packet[TCP].sport, server_tcp_port)
-                    self.check_tcp_checksum(packet)
+                    self.assert_packet_checksums_valid(packet)
                 elif packet.haslayer(UDP):
                     self.assertEqual(packet[UDP].dport, self.udp_port_in)
                     self.assertEqual(packet[UDP].sport, server_udp_port)
@@ -3062,7 +2959,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, nat_ip)
             self.assertEqual(packet[IP].dst, self.pg1.remote_ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3082,7 +2979,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, self.pg1.remote_ip4)
             self.assertEqual(packet[IP].dst, self.pg0.remote_ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3117,7 +3014,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, host_nat_ip)
             self.assertEqual(packet[IP].dst, server.ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3137,7 +3034,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, server_nat_ip)
             self.assertEqual(packet[IP].dst, host.ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3172,7 +3069,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, self.nat_addr)
             self.assertEqual(packet[IP].dst, self.pg1.remote_ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3192,7 +3089,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, self.pg1.remote_ip4)
             self.assertEqual(packet[IP].dst, self.pg0.remote_ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3202,8 +3099,6 @@ class TestNAT44(MethodHolder):
         host = self.pg0.remote_hosts[0]
         server = self.pg0.remote_hosts[1]
         host_in_port = 1234
-        host_out_port = 0
-        server_in_port = 5678
         server_out_port = 8765
         server_nat_ip = "10.0.0.11"
 
@@ -3238,7 +3133,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, self.nat_addr)
             self.assertEqual(packet[IP].dst, server.ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3258,7 +3153,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(packet[IP].src, server_nat_ip)
             self.assertEqual(packet[IP].dst, host.ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -3385,7 +3280,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.dst, server.ip4)
             self.assertNotEqual(tcp.sport, host_in_port)
             self.assertEqual(tcp.dport, server_in_port)
-            self.check_tcp_checksum(p)
+            self.assert_packet_checksums_valid(p)
             host_out_port = tcp.sport
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
@@ -3407,7 +3302,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.dst, host.ip4)
             self.assertEqual(tcp.sport, server_out_port)
             self.assertEqual(tcp.dport, host_in_port)
-            self.check_tcp_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3439,14 +3334,12 @@ class TestNAT44(MethodHolder):
         self.pg_start()
         capture = self.pg0.get_capture(1)
         p = capture[0]
-        server = None
         try:
             ip = p[IP]
             tcp = p[TCP]
             self.assertEqual(ip.dst, self.pg0.remote_ip4)
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3465,8 +3358,7 @@ class TestNAT44(MethodHolder):
             tcp = p[TCP]
             self.assertEqual(ip.src, external_addr)
             self.assertEqual(tcp.sport, external_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3514,10 +3406,6 @@ class TestNAT44(MethodHolder):
         self.pg_start()
         capture = self.pg0.get_capture(len(pkts))
         self.verify_capture_in(capture, self.pg0)
-
-        tcp_port_out = self.tcp_port_out
-        udp_port_out = self.udp_port_out
-        icmp_id_out = self.icmp_id_out
 
         # session initiaded from remote host - do not translate
         pkts = self.create_stream_out(self.pg1,
@@ -3569,8 +3457,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(tcp.sport, 12345)
             self.assertEqual(ip.dst, self.pg1.remote_ip4)
             self.assertEqual(tcp.dport, local_port)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3590,8 +3477,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(tcp.sport, external_port)
             self.assertEqual(ip.dst, self.pg0.remote_ip4)
             self.assertEqual(tcp.dport, 12345)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3624,8 +3510,7 @@ class TestNAT44(MethodHolder):
             self.assertNotEqual(tcp.sport, 12345)
             external_port = tcp.sport
             self.assertEqual(tcp.dport, 80)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3646,8 +3531,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.dst, local_host.ip4)
             self.assertEqual(tcp.sport, 80)
             self.assertEqual(tcp.dport, 12345)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3679,7 +3563,6 @@ class TestNAT44(MethodHolder):
         self.pg_start()
         capture = self.pg9.get_capture(1)
         p = capture[0]
-        server = None
         try:
             ip = p[IP]
             tcp = p[TCP]
@@ -3688,8 +3571,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(tcp.dport, local_port)
             self.assertNotEqual(tcp.sport, 12345)
             eh_port_in = tcp.sport
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3710,8 +3592,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.dst, remote_host.ip4)
             self.assertEqual(tcp.sport, external_port)
             self.assertEqual(tcp.dport, 12345)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -3815,10 +3696,8 @@ class TestNAT44(MethodHolder):
 
     def test_reass_hairpinning(self):
         """ NAT44 fragments hairpinning """
-        host = self.pg0.remote_hosts[0]
         server = self.pg0.remote_hosts[1]
         host_in_port = random.randint(1025, 65535)
-        host_out_port = 0
         server_in_port = random.randint(1025, 65535)
         server_out_port = random.randint(1025, 65535)
         data = "A" * 4 + "B" * 16 + "C" * 3
@@ -3921,8 +3800,7 @@ class TestNAT44(MethodHolder):
             self.assertEqual(tcp.dport, 22)
             self.assertNotEqual(tcp.sport, 4567)
             self.assertEqual((tcp.sport >> 6) & 63, 10)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -4031,8 +3909,7 @@ class TestNAT44(MethodHolder):
             eh_addr_in = ip.src
             eh_port_in = tcp.sport
             saved_port_in = tcp.dport
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -4052,11 +3929,24 @@ class TestNAT44(MethodHolder):
             self.assertEqual(ip.src, self.nat_addr)
             self.assertEqual(tcp.dport, eh_port_out)
             self.assertEqual(tcp.sport, port_out)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
+
+        if eh_translate:
+            sessions = self.vapi.nat44_user_session_dump(server.ip4n, 0)
+            self.assertEqual(len(sessions), 1)
+            self.assertTrue(sessions[0].ext_host_valid)
+            self.assertTrue(sessions[0].is_twicenat)
+            self.vapi.nat44_del_session(
+                sessions[0].inside_ip_address,
+                sessions[0].inside_port,
+                sessions[0].protocol,
+                ext_host_address=sessions[0].ext_host_nat_address,
+                ext_host_port=sessions[0].ext_host_nat_port)
+            sessions = self.vapi.nat44_user_session_dump(server.ip4n, 0)
+            self.assertEqual(len(sessions), 0)
 
     def test_twice_nat(self):
         """ Twice NAT44 """
@@ -4168,7 +4058,7 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg0.remote_mac, dst=self.pg0.local_mac) /
                  IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4) /
                  TCP(sport=self.tcp_port_in, dport=self.tcp_external_port,
-                     flags="FA"))
+                     flags="FA", seq=100, ack=300))
             self.pg0.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -4180,14 +4070,14 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg1.remote_mac, dst=self.pg1.local_mac) /
                  IP(src=self.pg1.remote_ip4, dst=self.nat_addr) /
                  TCP(sport=self.tcp_external_port, dport=self.tcp_port_out,
-                     flags="A"))
+                     flags="A", seq=300, ack=101))
             pkts.append(p)
 
             # FIN packet out -> in
             p = (Ether(src=self.pg1.remote_mac, dst=self.pg1.local_mac) /
                  IP(src=self.pg1.remote_ip4, dst=self.nat_addr) /
                  TCP(sport=self.tcp_external_port, dport=self.tcp_port_out,
-                     flags="FA"))
+                     flags="FA", seq=300, ack=101))
             pkts.append(p)
 
             self.pg1.add_stream(pkts)
@@ -4199,7 +4089,7 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg0.remote_mac, dst=self.pg0.local_mac) /
                  IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4) /
                  TCP(sport=self.tcp_port_in, dport=self.tcp_external_port,
-                     flags="A"))
+                     flags="A", seq=101, ack=301))
             self.pg0.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -4231,38 +4121,28 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg1.remote_mac, dst=self.pg1.local_mac) /
                  IP(src=self.pg1.remote_ip4, dst=self.nat_addr) /
                  TCP(sport=self.tcp_external_port, dport=self.tcp_port_out,
-                     flags="FA"))
+                     flags="FA", seq=100, ack=300))
             self.pg1.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
             self.pg0.get_capture(1)
 
-            pkts = []
-
-            # ACK packet in -> out
+            # FIN+ACK packet in -> out
             p = (Ether(src=self.pg0.remote_mac, dst=self.pg0.local_mac) /
                  IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4) /
                  TCP(sport=self.tcp_port_in, dport=self.tcp_external_port,
-                     flags="A"))
-            pkts.append(p)
+                     flags="FA", seq=300, ack=101))
 
-            # ACK packet in -> out
-            p = (Ether(src=self.pg0.remote_mac, dst=self.pg0.local_mac) /
-                 IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4) /
-                 TCP(sport=self.tcp_port_in, dport=self.tcp_external_port,
-                     flags="FA"))
-            pkts.append(p)
-
-            self.pg0.add_stream(pkts)
+            self.pg0.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
-            self.pg1.get_capture(2)
+            self.pg1.get_capture(1)
 
             # ACK packet out -> in
             p = (Ether(src=self.pg1.remote_mac, dst=self.pg1.local_mac) /
                  IP(src=self.pg1.remote_ip4, dst=self.nat_addr) /
                  TCP(sport=self.tcp_external_port, dport=self.tcp_port_out,
-                     flags="A"))
+                     flags="A", seq=101, ack=301))
             self.pg1.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -4294,7 +4174,7 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg0.remote_mac, dst=self.pg0.local_mac) /
                  IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4) /
                  TCP(sport=self.tcp_port_in, dport=self.tcp_external_port,
-                     flags="FA"))
+                     flags="FA", seq=100, ack=300))
             self.pg0.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -4304,7 +4184,7 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg1.remote_mac, dst=self.pg1.local_mac) /
                  IP(src=self.pg1.remote_ip4, dst=self.nat_addr) /
                  TCP(sport=self.tcp_external_port, dport=self.tcp_port_out,
-                     flags="FA"))
+                     flags="FA", seq=300, ack=100))
             self.pg1.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -4314,7 +4194,7 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg0.remote_mac, dst=self.pg0.local_mac) /
                  IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4) /
                  TCP(sport=self.tcp_port_in, dport=self.tcp_external_port,
-                     flags="A"))
+                     flags="A", seq=101, ack=301))
             self.pg0.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -4324,7 +4204,7 @@ class TestNAT44(MethodHolder):
             p = (Ether(src=self.pg1.remote_mac, dst=self.pg1.local_mac) /
                  IP(src=self.pg1.remote_ip4, dst=self.nat_addr) /
                  TCP(sport=self.tcp_external_port, dport=self.tcp_port_out,
-                     flags="A"))
+                     flags="A", seq=301, ack=101))
             self.pg1.add_stream(p)
             self.pg_enable_capture(self.pg_interfaces)
             self.pg_start()
@@ -5395,8 +5275,6 @@ class TestNAT64(MethodHolder):
         self.udp_port_in = 6304
         self.icmp_id_in = 6305
 
-        ses_num_start = self.nat64_get_ses_num()
-
         self.vapi.nat64_add_del_pool_addr_range(self.nat_addr_n,
                                                 self.nat_addr_n)
         self.vapi.nat64_add_del_interface(self.pg0.sw_if_index)
@@ -5439,7 +5317,7 @@ class TestNAT64(MethodHolder):
                 inner = packet[IPerror]
                 self.assertEqual(inner.src, self.pg1.remote_ip4)
                 self.assertEqual(inner.dst, self.nat_addr)
-                self.check_icmp_checksum(packet)
+                self.assert_packet_checksums_valid(packet)
                 if inner.haslayer(TCPerror):
                     self.assertEqual(inner[TCPerror].dport, self.tcp_port_out)
                 elif inner.haslayer(UDPerror):
@@ -5468,7 +5346,7 @@ class TestNAT64(MethodHolder):
                 inner = icmp[IPerror6]
                 self.assertEqual(inner.src, self.pg0.remote_ip6)
                 self.assertEqual(inner.dst, ip.src)
-                self.check_icmpv6_checksum(packet)
+                self.assert_icmpv6_checksum_valid(packet)
                 if inner.haslayer(TCPerror):
                     self.assertEqual(inner[TCPerror].sport, self.tcp_port_in)
                 elif inner.haslayer(UDPerror):
@@ -5530,15 +5408,14 @@ class TestNAT64(MethodHolder):
             try:
                 self.assertEqual(packet[IPv6].src, nat_addr_ip6)
                 self.assertEqual(packet[IPv6].dst, server.ip6)
+                self.assert_packet_checksums_valid(packet)
                 if packet.haslayer(TCP):
                     self.assertNotEqual(packet[TCP].sport, client_tcp_in_port)
                     self.assertEqual(packet[TCP].dport, server_tcp_in_port)
-                    self.check_tcp_checksum(packet)
                     client_tcp_out_port = packet[TCP].sport
                 else:
                     self.assertNotEqual(packet[UDP].sport, client_udp_in_port)
                     self.assertEqual(packet[UDP].dport, server_udp_in_port)
-                    self.check_udp_checksum(packet)
                     client_udp_out_port = packet[UDP].sport
             except:
                 self.logger.error(ppp("Unexpected or invalid packet:", packet))
@@ -5562,14 +5439,13 @@ class TestNAT64(MethodHolder):
             try:
                 self.assertEqual(packet[IPv6].src, nat_addr_ip6)
                 self.assertEqual(packet[IPv6].dst, client.ip6)
+                self.assert_packet_checksums_valid(packet)
                 if packet.haslayer(TCP):
                     self.assertEqual(packet[TCP].sport, server_tcp_out_port)
                     self.assertEqual(packet[TCP].dport, client_tcp_in_port)
-                    self.check_tcp_checksum(packet)
                 else:
                     self.assertEqual(packet[UDP].sport, server_udp_out_port)
                     self.assertEqual(packet[UDP].dport, client_udp_in_port)
-                    self.check_udp_checksum(packet)
             except:
                 self.logger.error(ppp("Unexpected or invalid packet:", packet))
                 raise
@@ -5593,7 +5469,7 @@ class TestNAT64(MethodHolder):
                 inner = icmp[IPerror6]
                 self.assertEqual(inner.src, server.ip6)
                 self.assertEqual(inner.dst, nat_addr_ip6)
-                self.check_icmpv6_checksum(packet)
+                self.assert_packet_checksums_valid(packet)
                 if inner.haslayer(TCPerror):
                     self.assertEqual(inner[TCPerror].sport, server_tcp_in_port)
                     self.assertEqual(inner[TCPerror].dport,
@@ -5716,7 +5592,7 @@ class TestNAT64(MethodHolder):
             self.assertEqual(packet[IP].src, self.nat_addr)
             self.assertEqual(packet[IP].dst, self.pg1.remote_ip4)
             self.assertTrue(packet.haslayer(GRE))
-            self.check_ip_checksum(packet)
+            self.assert_packet_checksums_valid(packet)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
@@ -5854,8 +5730,7 @@ class TestNAT64(MethodHolder):
             self.assertNotEqual(tcp.sport, 12345)
             external_port = tcp.sport
             self.assertEqual(tcp.dport, 80)
-            self.check_tcp_checksum(p)
-            self.check_ip_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -5876,7 +5751,7 @@ class TestNAT64(MethodHolder):
             self.assertEqual(ip.dst, self.pg3.remote_ip6)
             self.assertEqual(tcp.sport, 80)
             self.assertEqual(tcp.dport, 12345)
-            self.check_tcp_checksum(p)
+            self.assert_packet_checksums_valid(p)
         except:
             self.logger.error(ppp("Unexpected or invalid packet:", p))
             raise
@@ -5934,7 +5809,6 @@ class TestNAT64(MethodHolder):
     def test_reass_hairpinning(self):
         """ NAT64 fragments hairpinning """
         data = 'a' * 200
-        client = self.pg0.remote_hosts[0]
         server = self.pg0.remote_hosts[1]
         server_in_port = random.randint(1025, 65535)
         server_out_port = random.randint(1025, 65535)
@@ -6360,7 +6234,7 @@ class TestDSlite(MethodHolder):
         self.assertEqual(capture[IP].dst, self.pg0.remote_ip4)
         self.assertNotEqual(capture[UDP].sport, 20000)
         self.assertEqual(capture[UDP].dport, 10000)
-        self.check_ip_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
         out_port = capture[UDP].sport
 
         p = (Ether(dst=self.pg0.local_mac, src=self.pg0.remote_mac) /
@@ -6377,7 +6251,7 @@ class TestDSlite(MethodHolder):
         self.assertEqual(capture[IP].dst, '192.168.1.1')
         self.assertEqual(capture[UDP].sport, 10000)
         self.assertEqual(capture[UDP].dport, 20000)
-        self.check_ip_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
 
         # TCP
         p = (Ether(dst=self.pg1.local_mac, src=self.pg1.remote_mac) /
@@ -6394,8 +6268,7 @@ class TestDSlite(MethodHolder):
         self.assertEqual(capture[IP].dst, self.pg0.remote_ip4)
         self.assertNotEqual(capture[TCP].sport, 20001)
         self.assertEqual(capture[TCP].dport, 10001)
-        self.check_ip_checksum(capture)
-        self.check_tcp_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
         out_port = capture[TCP].sport
 
         p = (Ether(dst=self.pg0.local_mac, src=self.pg0.remote_mac) /
@@ -6412,8 +6285,7 @@ class TestDSlite(MethodHolder):
         self.assertEqual(capture[IP].dst, '192.168.1.1')
         self.assertEqual(capture[TCP].sport, 10001)
         self.assertEqual(capture[TCP].dport, 20001)
-        self.check_ip_checksum(capture)
-        self.check_tcp_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
 
         # ICMP
         p = (Ether(dst=self.pg1.local_mac, src=self.pg1.remote_mac) /
@@ -6429,8 +6301,7 @@ class TestDSlite(MethodHolder):
         self.assertEqual(capture[IP].src, self.nat_addr)
         self.assertEqual(capture[IP].dst, self.pg0.remote_ip4)
         self.assertNotEqual(capture[ICMP].id, 4000)
-        self.check_ip_checksum(capture)
-        self.check_icmp_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
         out_id = capture[ICMP].id
 
         p = (Ether(dst=self.pg0.local_mac, src=self.pg0.remote_mac) /
@@ -6446,8 +6317,7 @@ class TestDSlite(MethodHolder):
         self.assertEqual(capture[IP].src, self.pg0.remote_ip4)
         self.assertEqual(capture[IP].dst, '192.168.1.1')
         self.assertEqual(capture[ICMP].id, 4000)
-        self.check_ip_checksum(capture)
-        self.check_icmp_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
 
         # ping DS-Lite AFTR tunnel endpoint address
         p = (Ether(dst=self.pg1.local_mac, src=self.pg1.remote_mac) /
@@ -6534,7 +6404,7 @@ class TestDSliteCE(MethodHolder):
         self.assertEqual(capture[IP].dst, self.pg1.remote_ip4)
         self.assertEqual(capture[UDP].sport, 10000)
         self.assertEqual(capture[UDP].dport, 20000)
-        self.check_ip_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
 
         # UDP decapsulation
         p = (Ether(dst=self.pg1.local_mac, src=self.pg1.remote_mac) /
@@ -6551,7 +6421,7 @@ class TestDSliteCE(MethodHolder):
         self.assertEqual(capture[IP].dst, self.pg0.remote_ip4)
         self.assertEqual(capture[UDP].sport, 20000)
         self.assertEqual(capture[UDP].dport, 10000)
-        self.check_ip_checksum(capture)
+        self.assert_packet_checksums_valid(capture)
 
         # ping DS-Lite B4 tunnel endpoint address
         p = (Ether(dst=self.pg1.local_mac, src=self.pg1.remote_mac) /
@@ -6632,12 +6502,7 @@ class TestNAT66(MethodHolder):
             try:
                 self.assertEqual(packet[IPv6].src, self.nat_addr)
                 self.assertEqual(packet[IPv6].dst, self.pg1.remote_ip6)
-                if packet.haslayer(TCP):
-                    self.check_tcp_checksum(packet)
-                elif packet.haslayer(UDP):
-                    self.check_udp_checksum(packet)
-                elif packet.haslayer(ICMPv6EchoRequest):
-                    self.check_icmpv6_checksum(packet)
+                self.assert_packet_checksums_valid(packet)
             except:
                 self.logger.error(ppp("Unexpected or invalid packet:", packet))
                 raise
@@ -6668,12 +6533,7 @@ class TestNAT66(MethodHolder):
             try:
                 self.assertEqual(packet[IPv6].src, self.pg1.remote_ip6)
                 self.assertEqual(packet[IPv6].dst, self.pg0.remote_ip6)
-                if packet.haslayer(TCP):
-                    self.check_tcp_checksum(packet)
-                elif packet.haslayer(UDP):
-                    self.check_udp_checksum(packet)
-                elif packet.haslayer(ICMPv6EchoReply):
-                    self.check_icmpv6_checksum(packet)
+                self.assert_packet_checksums_valid(packet)
             except:
                 self.logger.error(ppp("Unexpected or invalid packet:", packet))
                 raise
@@ -6728,6 +6588,7 @@ class TestNAT66(MethodHolder):
             self.logger.info(self.vapi.cli("show nat66 interfaces"))
             self.logger.info(self.vapi.cli("show nat66 static mappings"))
             self.clear_nat66()
+
 
 if __name__ == '__main__':
     unittest.main(testRunner=VppTestRunner)

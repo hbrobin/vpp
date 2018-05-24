@@ -254,6 +254,10 @@ struct _session_manager_main
 
 extern session_manager_main_t session_manager_main;
 extern vlib_node_registration_t session_queue_node;
+extern vlib_node_registration_t session_queue_process_node;
+
+#define SESSION_Q_PROCESS_FLUSH_FRAMES	1
+#define SESSION_Q_PROCESS_STOP		2
 
 /*
  * Session manager function
@@ -446,17 +450,24 @@ session_get_from_handle_safe (u64 handle)
 }
 
 always_inline u32
-stream_session_max_rx_enqueue (transport_connection_t * tc)
+transport_max_rx_enqueue (transport_connection_t * tc)
 {
   stream_session_t *s = session_get (tc->s_index, tc->thread_index);
   return svm_fifo_max_enqueue (s->server_rx_fifo);
 }
 
 always_inline u32
-stream_session_rx_fifo_size (transport_connection_t * tc)
+transport_rx_fifo_size (transport_connection_t * tc)
 {
   stream_session_t *s = session_get (tc->s_index, tc->thread_index);
   return s->server_rx_fifo->nitems;
+}
+
+always_inline u32
+transport_tx_fifo_size (transport_connection_t * tc)
+{
+  stream_session_t *s = session_get (tc->s_index, tc->thread_index);
+  return s->server_tx_fifo->nitems;
 }
 
 always_inline u32
@@ -593,6 +604,8 @@ transport_connection_t *listen_session_get_transport (stream_session_t * s);
 int
 listen_session_get_local_session_endpoint (stream_session_t * listener,
 					   session_endpoint_t * sep);
+
+void session_flush_frames_main_thread (vlib_main_t * vm);
 
 always_inline u8
 session_manager_is_enabled ()

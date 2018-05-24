@@ -936,6 +936,12 @@ tcp_update_snd_wnd (tcp_connection_t * tc, u32 seq, u32 ack, u32 snd_wnd)
     }
 }
 
+/**
+ * Init loss recovery/fast recovery.
+ *
+ * Triggered by dup acks as opposed to timer timeout. Note that cwnd is
+ * updated in @ref tcp_cc_handle_event after fast retransmit
+ */
 void
 tcp_cc_init_congestion (tcp_connection_t * tc)
 {
@@ -949,7 +955,6 @@ tcp_cc_init_congestion (tcp_connection_t * tc)
 static void
 tcp_cc_recovery_exit (tcp_connection_t * tc)
 {
-  /* Deflate rto */
   tc->rto_boff = 0;
   tcp_update_rto (tc);
   tc->snd_rxt_ts = 0;
@@ -999,6 +1004,7 @@ tcp_cc_recover (tcp_connection_t * tc)
   ASSERT (tcp_in_cong_recovery (tc));
   if (tcp_cc_is_spurious_retransmit (tc))
     {
+      clib_warning ("here");
       tcp_cc_congestion_undo (tc);
       return 1;
     }
@@ -1061,28 +1067,24 @@ tcp_cc_handle_event (tcp_connection_t * tc, u32 is_dack)
    * Duplicate ACK. Check if we should enter fast recovery, or if already in
    * it account for the bytes that left the network.
    */
-  if (is_dack)
+  if (is_dack && !tcp_in_recovery (tc))
     {
+      TCP_EVT_DBG (TCP_EVT_DUPACK_RCVD, tc, 1);
       ASSERT (tc->snd_una != tc->snd_una_max
 	      || tc->sack_sb.last_sacked_bytes);
 
       tc->rcv_dupacks++;
 
+      /* Pure duplicate ack. If some data got acked, it's handled lower */
       if (tc->rcv_dupacks > TCP_DUPACK_THRESHOLD && !tc->bytes_acked)
 	{
 	  ASSERT (tcp_in_fastrecovery (tc));
-	  /* Pure duplicate ack. If some data got acked, it's handled lower */
 	  tc->cc_algo->rcv_cong_ack (tc, TCP_CC_DUPACK);
 	  return;
 	}
       else if (tcp_should_fastrecover (tc))
 	{
-	  /* Things are already bad */
-	  if (tcp_in_cong_recovery (tc))
-	    {
-	      tc->rcv_dupacks = 0;
-	      goto partial_ack_test;
-	    }
+	  ASSERT (!tcp_in_fastrecovery (tc));
 
 	  /* If of of the two conditions lower hold, reset dupacks because
 	   * we're probably after timeout (RFC6582 heuristics).
@@ -1139,12 +1141,12 @@ tcp_cc_handle_event (tcp_connection_t * tc, u32 is_dack)
 	goto partial_ack;
     }
 
-partial_ack_test:
-
   if (!tc->bytes_acked)
     return;
 
 partial_ack:
+  TCP_EVT_DBG (TCP_EVT_CC_PACK, tc);
+
   /*
    * Legitimate ACK. 1) See if we can exit recovery
    */
@@ -1171,17 +1173,18 @@ partial_ack:
   /*
    * Legitimate ACK. 2) If PARTIAL ACK try to retransmit
    */
-  TCP_EVT_DBG (TCP_EVT_CC_PACK, tc);
 
   /* RFC6675: If the incoming ACK is a cumulative acknowledgment,
-   * reset dupacks to 0 */
+   * reset dupacks to 0. Also needed if in congestion recovery */
   tc->rcv_dupacks = 0;
-
-  tcp_retransmit_first_unacked (tc);
 
   /* Post RTO timeout don't try anything fancy */
   if (tcp_in_recovery (tc))
-    return;
+    {
+      tc->cc_algo->rcv_ack (tc);
+      tc->tsecr_last_ack = tc->rcv_opts.tsecr;
+      return;
+    }
 
   /* Remove retransmitted bytes that have been delivered */
   ASSERT (tc->bytes_acked + tc->sack_sb.snd_una_adv
@@ -1262,7 +1265,6 @@ tcp_rcv_ack (tcp_connection_t * tc, vlib_buffer_t * b,
 		   vnet_buffer (b)->tcp.ack_number);
       if (tcp_in_fastrecovery (tc) && tc->rcv_dupacks == TCP_DUPACK_THRESHOLD)
 	{
-	  TCP_EVT_DBG (TCP_EVT_DUPACK_RCVD, tc);
 	  tcp_cc_handle_event (tc, 1);
 	}
       /* Don't drop yet */
@@ -1300,7 +1302,6 @@ tcp_rcv_ack (tcp_connection_t * tc, vlib_buffer_t * b,
       if (!tcp_in_cong_recovery (tc))
 	return 0;
       *error = TCP_ERROR_ACK_DUP;
-      TCP_EVT_DBG (TCP_EVT_DUPACK_RCVD, tc, 1);
       return vnet_buffer (b)->tcp.data_len ? 0 : -1;
     }
 
@@ -2126,6 +2127,7 @@ tcp46_syn_sent_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  new_tc0->timers[TCP_TIMER_ESTABLISH] = TCP_TIMER_HANDLE_INVALID;
 	  new_tc0->timers[TCP_TIMER_RETRANSMIT_SYN] =
 	    TCP_TIMER_HANDLE_INVALID;
+	  new_tc0->sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
 	  /* If this is not the owning thread, wait for syn retransmit to
 	   * expire and cleanup then */
@@ -2818,6 +2820,7 @@ tcp46_listen_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  child0->irs = vnet_buffer (b0)->tcp.seq_number;
 	  child0->rcv_nxt = vnet_buffer (b0)->tcp.seq_number + 1;
 	  child0->rcv_las = child0->rcv_nxt;
+	  child0->sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
 	  /* RFC1323: TSval timestamps sent on {SYN} and {SYN,ACK}
 	   * segments are used to initialize PAWS. */
